@@ -1,0 +1,39 @@
+{
+  "name": "motivation-telegram-bot",
+  "version": "1.0.0",
+  "description": "A Telegram bot for personal motivation and goal tracking",
+  "main": "dist/index.js",
+  "scripts": {
+    "clean": "rm -rf dist",
+    "build": "npm run clean && tsc",
+    "start": "node dist/index.js",
+    "dev": "ts-node src/index.ts"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.32.1",
+    "dotenv": "^16.4.7",
+    "express": "^4.21.2",
+    "node-schedule": "^2.1.1",
+    "sqlite": "^5.1.1",
+    "sqlite3": "^5.1.7",
+    "telegraf": "^4.16.3"
+  },
+  "devDependencies": {
+    "@types/express": "^5.0.0",
+    "@types/jest": "^29.5.12",
+    "@types/node": "^20.11.19",
+    "@types/node-schedule": "^2.1.6",
+    "@types/sqlite3": "^3.1.11",
+    "@typescript-eslint/eslint-plugin": "^7.0.1",
+    "@typescript-eslint/parser": "^7.0.1",
+    "eslint": "^8.56.0",
+    "jest": "^29.7.0",
+    "nodemon": "^3.0.3",
+    "ts-jest": "^29.1.2",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.3.3"
+  },
+  "engines": {
+    "node": ">=16.0.0"
+  }
+}
