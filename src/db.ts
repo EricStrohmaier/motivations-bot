@@ -8,6 +8,13 @@ export class DatabaseService {
   private db: Database | null = null;
 
   async initialize(): Promise<void> {
+    console.log("Initializing database...");
+    console.log(
+      "Database path:",
+      process.env.NODE_ENV === "production"
+        ? "/usr/src/app/data/motivation_bot.db"
+        : "motivation_bot.db"
+    );
     this.db = await open({
       filename:
         process.env.NODE_ENV === "production"

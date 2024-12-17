@@ -56,25 +56,56 @@ export class MotivationBot {
         command: "motivate",
         description: "Get an immediate motivation message",
       },
+      {
+        command: "togglecheckins",
+        description: "Toggle check-in reminders on/off",
+      },
       { command: "help", description: "Show help message" },
     ]);
   }
   private setupCommands(): void {
     this.bot.command("messages", async (ctx) => {
-      const keyboard = {
-        inline_keyboard: [
-          [{ text: "➕ Add New Message", callback_data: "add_message" }],
-          [{ text: "📝 View Messages", callback_data: "view_messages" }],
-          [{ text: "🔄 Reset to Defaults", callback_data: "reset_messages" }],
-          [{ text: "🎲 Test Random Message", callback_data: "test_message" }],
-          [{ text: "✅ Clear All Messages", callback_data: "clear_messages" }],
-        ],
-      };
+      try {
+        let user = await this.db.getUser(ctx.from.id);
 
-      await ctx.reply(
-        "Manage your motivation messages. These will be used for daily motivation instead of AI-generated ones:",
-        { reply_markup: keyboard }
-      );
+        // If no user exists, create a basic profile
+        if (!user) {
+          user = {
+            userId: ctx.from.id,
+            username: ctx.from.username || "",
+            goals: [],
+            motivationFrequency: 2,
+            timezone: "UTC",
+            checkInEnabled: true,
+            lastMessageDate: new Date(),
+            customMotivationMessages: [],
+          };
+          await this.db.saveUser(user);
+        }
+
+        const keyboard = {
+          inline_keyboard: [
+            [{ text: "➕ Add New Message", callback_data: "add_message" }],
+            [{ text: "📝 View Messages", callback_data: "view_messages" }],
+            [{ text: "🔄 Reset to Defaults", callback_data: "reset_messages" }],
+            [{ text: "🎲 Test Random Message", callback_data: "test_message" }],
+            [
+              {
+                text: "✅ Clear All Messages",
+                callback_data: "clear_messages",
+              },
+            ],
+          ],
+        };
+
+        await ctx.reply(
+          "Manage your motivation messages. These will be used for daily motivation instead of AI-generated ones:",
+          { reply_markup: keyboard }
+        );
+      } catch (error) {
+        console.error("Error in messages command:", error);
+        await ctx.reply("Sorry, there was an error. Please try again.");
+      }
     });
 
     this.bot.action("add_message", async (ctx: any) => {
@@ -146,19 +177,57 @@ export class MotivationBot {
       await ctx.answerCbQuery();
     });
 
-    this.bot.command("clear_messages", async (ctx) => {
-      const user = await this.db.getUser(ctx.from.id);
-      if (!user) {
-        await ctx.reply("Please use /setup first to create your profile.");
-        return;
+    this.bot.action("clear_messages", async (ctx) => {
+      console.log("Clear messages action triggered");
+      try {
+        if (!ctx.from) {
+          console.error("No from field in context");
+          return;
+        }
+
+        console.log("Attempting to clear messages for user:", ctx.from.id);
+        const user = await this.db.getUser(ctx.from.id);
+
+        if (!user) {
+          console.log("No user found for clear_messages action");
+          await ctx.answerCbQuery("Please set up your profile first");
+          return;
+        }
+
+        console.log("Clearing messages for user:", user.userId);
+        user.customMotivationMessages = [];
+        await this.db.saveUser(user);
+
+        try {
+          await ctx.editMessageText(
+            "✅ Messages cleared! Now using AI-generated motivation messages.\n\nUse /messages to return to the messages menu.",
+            { reply_markup: undefined }
+          );
+        } catch (editError) {
+          console.error("Error editing message:", editError);
+          // Fallback to sending new message if edit fails
+          await ctx.reply(
+            "✅ Messages cleared! Now using AI-generated motivation messages.\n\nUse /messages to return to the messages menu."
+          );
+        }
+
+        await ctx.answerCbQuery("Messages cleared successfully!");
+        console.log("Clear messages action completed successfully");
+      } catch (error) {
+        console.error("Error in clear_messages action:", error);
+        try {
+          await ctx.answerCbQuery("Error clearing messages. Please try again.");
+        } catch (cbError) {
+          console.error("Error sending callback query answer:", cbError);
+        }
+        try {
+          await ctx.reply(
+            "Sorry, there was an error clearing your messages. Please try again."
+          );
+        } catch (replyError) {
+          console.error("Error sending error reply:", replyError);
+        }
       }
-
-      user.customMotivationMessages = [];
-      await this.db.saveUser(user);
-
-      await ctx.reply(
-        "✅ Messages cleared! Now using AI-generated motivation messages."
-      );
     });
 
     this.bot.command("togglecheckins", async (ctx) => {
@@ -248,6 +317,8 @@ I'm here to help you stay motivated and achieve your goals. Here are the command
 /goals - Manage your goals
 /messages - Manage your motivation messages
 /progress - Track your progress
+/motivate - Get an immediate motivation message
+/togglecheckins - Toggle check-in reminders on/off
 /help - Show this help message
 
 Let's begin by setting up your profile with /setup
@@ -458,6 +529,7 @@ Let's begin by setting up your profile with /setup
   private async handleMessage(ctx: any): Promise<void> {
     const userId = ctx.from.id;
     const messageText = ctx.message.text;
+
     if (ctx.session?.step === "adding_message") {
       const user = await this.db.getUser(ctx.from.id);
       if (!user) {
@@ -496,6 +568,10 @@ Let's begin by setting up your profile with /setup
             // Validate timezone
             Intl.DateTimeFormat(undefined, { timeZone: messageText });
             userProfile.timezone = messageText;
+
+            // Save the profile immediately after timezone is set
+            await this.db.saveUser(userProfile as UserProfile);
+
             await ctx.reply(
               "Great! Now, would you like to receive daily check-ins (morning and evening)? Reply with yes/no"
             );
@@ -511,10 +587,13 @@ Let's begin by setting up your profile with /setup
           userProfile.checkInEnabled = messageText
             .toLowerCase()
             .includes("yes");
+          // Save profile after check-ins preference is set
+          await this.db.saveUser(userProfile as UserProfile);
+
           await ctx.reply(
             "Perfect! Now, do you want to set up custom motivation messages? Reply /messages to get started."
           );
-          ctx.session.step = "adding_message";
+          delete ctx.session.step; // End the setup flow here
           return;
 
         case "goals":
@@ -557,10 +636,6 @@ Let's begin by setting up your profile with /setup
 
           await ctx.reply(confirmationMessage);
           delete ctx.session.step;
-          return;
-
-        case "scheduling":
-          // Handle scheduling-specific messages if needed
           return;
       }
     }
