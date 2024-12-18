@@ -17,8 +17,6 @@ RUN npm install
 # Bundle app source
 COPY . .
 
-# Create volume directory for SQLite database
-RUN mkdir -p /usr/src/app/data
 
 # Build TypeScript
 RUN npx tsc
