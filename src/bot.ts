@@ -43,6 +43,7 @@ export class MotivationBot {
     "You have already made ~100 hours of composing music since 2021, so you need only 9900 hours to go. If working 1 hour a day, then it's 30 hours per month, and you will gain 90-100 hours in a quarter and about 400 hours per year. If you double this and work 2 hours a day, then 800 hours per year. If you work 5 hours a day, then it's gonna be 1800 hours per year which means that in 5-6 years you will become a professional! But already in 1-2 years, you can get a job in this.",
     "Do one more track for Mom. She likes listening to my tracks and always appreciates it.",
     "Your music should look like you in your perfect outfits every day creative and outstanding. Your catalog of music will be like your wardrobe. People will judge you but also understand you by your music and your work.",
+    "Keep going I love you.",
   ];
 
   private async setBotCommands(): Promise<void> {
