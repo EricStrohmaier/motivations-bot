@@ -7,5 +7,12 @@ declare module "pg" {
   }
 }
 
-export type MessageType = "motivation" | "progress_update" | "goal_completion" | "check_in";
+export type MessageType =
+  | "motivation"
+  | "progress_update"
+  | "goal_completion"
+  | "check_in"
+  | "custom"
+  | "user_message"
+  | "assistant_message";
 export type GoalStatus = "active" | "completed" | "abandoned";
