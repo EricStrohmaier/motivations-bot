@@ -1,6 +1,6 @@
 // src/bot.ts
 import { Telegraf, session } from "telegraf";
-import { DatabaseService } from "./db";
+import { DatabaseService } from "./db/index";
 import { ClaudeService } from "./claude-service";
 import { scheduleJob } from "node-schedule";
 import { parseGoalAndDeadline } from "./helper";
@@ -61,13 +61,14 @@ export class MotivationBot {
         command: "togglecheckins",
         description: "Toggle check-in reminders on/off",
       },
+      { command: "testschedule", description: "Test the scheduler timings" },
       { command: "help", description: "Show help message" },
     ]);
   }
   private setupCommands(): void {
     this.bot.command("messages", async (ctx) => {
       try {
-        let user = await this.db.getUser(ctx.from.id);
+        let user = await this.db.users.getUser(ctx.from.id);
 
         // If no user exists, create a basic profile
         if (!user) {
@@ -81,7 +82,7 @@ export class MotivationBot {
             lastMessageDate: new Date(),
             customMotivationMessages: [],
           };
-          await this.db.saveUser(user);
+          await this.db.users.saveUser(user);
         }
 
         const keyboard = {
@@ -116,7 +117,7 @@ export class MotivationBot {
     });
 
     this.bot.action("view_messages", async (ctx) => {
-      const user = await this.db.getUser(ctx.from!.id);
+      const user = await this.db.users.getUser(ctx.from!.id);
       if (!user || !user.customMotivationMessages?.length) {
         await ctx.reply(
           "You don't have any custom messages set. Using AI-generated messages instead."
@@ -136,7 +137,7 @@ export class MotivationBot {
     this.bot.action("reset_messages", async (ctx) => {
       try {
         // Get user and handle non-existence
-        const user = await this.db.getUser(ctx.from!.id);
+        const user = await this.db.users.getUser(ctx.from!.id);
         if (!user) {
           await ctx.reply("Please set up your profile first using /setup");
           await ctx.answerCbQuery();
@@ -150,7 +151,7 @@ export class MotivationBot {
         };
 
         // Save to database
-        await this.db.saveUser(updatedUser);
+        await this.db.users.saveUser(updatedUser);
 
         await ctx.reply(
           "✅ Messages reset to default music producer motivation messages!\n\nUse /messages to view them."
@@ -167,12 +168,13 @@ export class MotivationBot {
 
     this.bot.action("test_message", async (ctx) => {
       try {
-        const user = await this.db.getUser(ctx.from!.id);
+        const user = await this.db.users.getUser(ctx.from!.id);
         const message = await this.claude.generateMotivationalMessage(
           user as UserProfile
         );
         await ctx.reply(`Test message:\n\n${message}`);
       } catch (error) {
+        console.log("Error generating test message:", error);
         await ctx.reply("Sorry, I couldn't generate a test message right now.");
       }
       await ctx.answerCbQuery();
@@ -187,7 +189,7 @@ export class MotivationBot {
         }
 
         console.log("Attempting to clear messages for user:", ctx.from.id);
-        const user = await this.db.getUser(ctx.from.id);
+        const user = await this.db.users.getUser(ctx.from.id);
 
         if (!user) {
           console.log("No user found for clear_messages action");
@@ -197,7 +199,7 @@ export class MotivationBot {
 
         console.log("Clearing messages for user:", user.userId);
         user.customMotivationMessages = [];
-        await this.db.saveUser(user);
+        await this.db.users.saveUser(user);
 
         try {
           await ctx.editMessageText(
@@ -232,14 +234,14 @@ export class MotivationBot {
     });
 
     this.bot.command("togglecheckins", async (ctx) => {
-      const user = await this.db.getUser(ctx.from.id);
+      const user = await this.db.users.getUser(ctx.from.id);
       if (!user) {
         await ctx.reply("Please use /setup first to create your profile.");
         return;
       }
 
       user.checkInEnabled = !user.checkInEnabled;
-      await this.db.saveUser(user);
+      await this.db.users.saveUser(user);
 
       await ctx.reply(
         user.checkInEnabled
@@ -275,7 +277,7 @@ export class MotivationBot {
     // Add this to your setupCommands method
     this.bot.command("check_logs", async (ctx) => {
       try {
-        const logs = await this.db.getRecentMessages(ctx.from.id, 5);
+        const logs = await this.db.messages.getRecentMessages(ctx.from.id, 5);
 
         if (logs.length === 0) {
           await ctx.reply("No message history found yet.");
@@ -307,6 +309,79 @@ export class MotivationBot {
       }
     });
 
+    // Add test command for scheduler
+    this.bot.command("testschedule", async (ctx) => {
+      try {
+        const user = await this.db.users.getUser(ctx.from.id);
+        if (!user) {
+          await ctx.reply("Please set up your profile first using /setup");
+          return;
+        }
+
+        // Test different times
+        const testTimes = [
+          { hour: 9, minute: 0 }, // Morning check-in
+          { hour: 12, minute: 0 }, // Motivation message
+          { hour: 20, minute: 0 }, // Evening check-in
+        ];
+
+        await ctx.reply("🔍 Testing scheduler...");
+
+        for (const time of testTimes) {
+          const testDate = new Date();
+          testDate.setHours(time.hour, time.minute, 0);
+
+          const userTime = testDate.toLocaleString("en-US", {
+            timeZone: user.timezone,
+          });
+          const userDate = new Date(userTime);
+          const userHour = userDate.getHours();
+          const userMinutes = userDate.getMinutes();
+          const isEvenDay = userDate.getDate() % 2 === 0;
+
+          await ctx.reply(
+            `Testing time: ${time.hour}:${time.minute
+              .toString()
+              .padStart(2, "0")}`
+          );
+
+          // Morning check-in
+          if (userHour === 9 && userMinutes === 0 && isEvenDay) {
+            const message =
+              "🌅 Good morning! What's your smallest achievable goal for today?";
+            await ctx.reply(
+              `[TEST] Morning Check-in would be sent: ${message}`
+            );
+          }
+
+          // Motivation message
+          if (userHour === 12 && userMinutes === 0) {
+            const message = await this.claude.generateMotivationalMessage(user);
+            await ctx.reply(
+              `[TEST] Motivation message would be sent: ${message}`
+            );
+          }
+
+          // Evening check-in
+          if (userHour === 20 && userMinutes === 0 && isEvenDay) {
+            const message =
+              "🌙 Evening check-in! Did you manage to achieve your goals today?";
+            await ctx.reply(
+              `[TEST] Evening Check-in would be sent: ${message}`
+            );
+          }
+        }
+
+        await ctx.reply(
+          "✅ Scheduler test complete! Note: actual messages are sent based on your timezone: " +
+            user.timezone
+        );
+      } catch (error) {
+        console.error("Error in test schedule:", error);
+        await ctx.reply("Sorry, there was an error testing the schedule.");
+      }
+    });
+
     // Start command
     this.bot.command("start", async (ctx) => {
       const welcomeMessage = `
@@ -317,7 +392,6 @@ I'm here to help you stay motivated and achieve your goals. Here are the command
 /setup - Set up your profile and preferences
 /goals - Manage your goals
 /messages - Manage your motivation messages
-/progress - Track your progress
 /motivate - Get an immediate motivation message
 /togglecheckins - Toggle check-in reminders on/off
 /help - Show this help message
@@ -345,7 +419,7 @@ Let's begin by setting up your profile with /setup
     // View Goals handler
     this.bot.action("view_goals", async (ctx) => {
       try {
-        const user = await this.db.getUser(ctx.from!.id);
+        const user = await this.db.users.getUser(ctx.from!.id);
         if (!user || user.goals.length === 0) {
           await ctx.reply(
             "You haven't set any goals yet. Use the 'Add New Goal' button to get started!"
@@ -394,7 +468,7 @@ Let's begin by setting up your profile with /setup
     // Mark Goal Complete handler
     this.bot.action("complete_goal", async (ctx) => {
       try {
-        const user = await this.db.getUser(ctx.from!.id);
+        const user = await this.db.users.getUser(ctx.from!.id);
         if (!user || user.goals.length === 0) {
           await ctx.reply("You don't have any goals to mark as complete.");
           await ctx.answerCbQuery();
@@ -428,7 +502,7 @@ Let's begin by setting up your profile with /setup
     this.bot.action(/complete_goal_(\d+)/, async (ctx) => {
       try {
         const goalIndex = parseInt(ctx.match[1]);
-        const user = await this.db.getUser(ctx.from!.id);
+        const user = await this.db.users.getUser(ctx.from!.id);
 
         if (!user || !user.goals[goalIndex]) {
           await ctx.reply("Goal not found.");
@@ -439,7 +513,7 @@ Let's begin by setting up your profile with /setup
         const completedGoal = user.goals[goalIndex];
 
         // Save to goal progress
-        await this.db.saveGoalProgress(
+        await this.db.goals.saveGoalProgress(
           user.userId,
           completedGoal.text,
           "completed",
@@ -448,7 +522,7 @@ Let's begin by setting up your profile with /setup
 
         // Remove the completed goal from the list
         user.goals.splice(goalIndex, 1);
-        await this.db.saveUser(user);
+        await this.db.users.saveUser(user);
 
         const celebrationEmojis = ["🎉", "🎊", "🌟", "⭐", "🏆", "✨"];
         const randomEmoji =
@@ -475,7 +549,7 @@ Let's begin by setting up your profile with /setup
 
     this.bot.command("motivate", async (ctx) => {
       try {
-        const user = await this.db.getUser(ctx.from.id);
+        const user = await this.db.users.getUser(ctx.from.id);
         console.log(user);
         if (!user) {
           await ctx.reply("Please use /setup first to create your profile.");
@@ -483,7 +557,7 @@ Let's begin by setting up your profile with /setup
         }
         const message = await this.claude.generateMotivationalMessage(user);
         await ctx.reply(message);
-        await this.db.logMessage(ctx.from.id, message, "motivation");
+        await this.db.messages.logMessage(ctx.from.id, message, "motivation");
       } catch (error) {
         console.error("Error generating test motivation:", error);
         await ctx.reply(
@@ -516,13 +590,13 @@ Let's begin by setting up your profile with /setup
   }
 
   private async handleProgressCommand(ctx: any): Promise<void> {
-    const user = await this.db.getUser(ctx.from.id);
+    const user = await this.db.users.getUser(ctx.from.id);
     if (!user) {
       await ctx.reply("Please use /setup first to create your profile.");
       return;
     }
 
-    const progress = await this.db.getGoalProgress(ctx.from.id);
+    const progress = await this.db.goals.getGoalProgress(ctx.from.id);
     const progressMessage = this.formatProgressMessage(progress);
     await ctx.reply(progressMessage);
   }
@@ -532,7 +606,7 @@ Let's begin by setting up your profile with /setup
     const messageText = ctx.message.text;
 
     if (ctx.session?.step === "adding_message") {
-      const user = await this.db.getUser(ctx.from.id);
+      const user = await this.db.users.getUser(ctx.from.id);
       if (!user) {
         await ctx.reply("Please set up your profile first using /setup");
         return;
@@ -543,7 +617,7 @@ Let's begin by setting up your profile with /setup
       }
 
       user.customMotivationMessages.push(ctx.message.text);
-      await this.db.saveUser(user);
+      await this.db.users.saveUser(user);
 
       await ctx.reply(
         "✅ New motivation message added! Use /messages to manage your messages."
@@ -553,7 +627,7 @@ Let's begin by setting up your profile with /setup
     }
     // Handle setup and configuration steps
     if (ctx.session?.step) {
-      let userProfile = (await this.db.getUser(userId)) || {
+      let userProfile = (await this.db.users.getUser(userId)) || {
         userId,
         username: ctx.from.username || "",
         goals: [],
@@ -571,7 +645,7 @@ Let's begin by setting up your profile with /setup
             userProfile.timezone = messageText;
 
             // Save the profile immediately after timezone is set
-            await this.db.saveUser(userProfile as UserProfile);
+            await this.db.users.saveUser(userProfile as UserProfile);
 
             await ctx.reply(
               "Great! Now, would you like to receive daily check-ins (morning and evening)? Reply with yes/no"
@@ -589,7 +663,7 @@ Let's begin by setting up your profile with /setup
             .toLowerCase()
             .includes("yes");
           // Save profile after check-ins preference is set
-          await this.db.saveUser(userProfile as UserProfile);
+          await this.db.users.saveUser(userProfile as UserProfile);
 
           await ctx.reply(
             "Perfect! Now, do you want to set up custom motivation messages? Reply /messages to get started."
@@ -605,7 +679,7 @@ Let's begin by setting up your profile with /setup
           };
           //   @ts-ignore
           userProfile.goals.push(newGoal);
-          await this.db.saveUser(userProfile as UserProfile);
+          await this.db.users.saveUser(userProfile as UserProfile);
           await ctx.reply(
             "Profile setup complete! You'll receive regular motivation messages."
           );
@@ -626,7 +700,7 @@ Let's begin by setting up your profile with /setup
           }
           //   @ts-ignore
           userProfile.goals.push(goalToAdd);
-          await this.db.saveUser(userProfile as UserProfile);
+          await this.db.users.saveUser(userProfile as UserProfile);
 
           let confirmationMessage = `✨ Great! I've added your new goal:\n"${goalToAdd.text}"`;
           if (deadline) {
@@ -648,7 +722,7 @@ Let's begin by setting up your profile with /setup
 
     // Handle general messages with AI
     try {
-      const userProfile = await this.db.getUser(userId);
+      const userProfile = await this.db.users.getUser(userId);
       if (!userProfile) {
         await ctx.reply(
           "Hi! I don't recognize you yet. Please use /setup to create your profile first!"
@@ -670,7 +744,7 @@ Let's begin by setting up your profile with /setup
     }
   }
   private async checkDeadlines(testDate?: Date): Promise<void> {
-    const users = await this.db.getAllUsers();
+    const users = await this.db.users.getAllUsers();
     const now = new Date();
     const currentHour = now.getHours();
 
@@ -736,7 +810,7 @@ Let's begin by setting up your profile with /setup
 
           if (reminderMessage) {
             await this.bot.telegram.sendMessage(user.userId, reminderMessage);
-            await this.db.logMessage(
+            await this.db.messages.logMessage(
               user.userId,
               reminderMessage,
               "progress_update"
@@ -754,9 +828,11 @@ Let's begin by setting up your profile with /setup
 
   // Modify setupScheduler to handle timezone-specific scheduling
   private setupScheduler(): void {
-    // Morning check-in (9 AM in user's timezone)
+    // Run every hour to check user timezones
     scheduleJob("0 * * * *", async () => {
-      const users = await this.db.getAllUsers();
+      const users = await this.db.users.getAllUsers();
+      const now = new Date();
+
       for (const user of users) {
         if (!user.checkInEnabled) continue;
 
@@ -765,34 +841,43 @@ Let's begin by setting up your profile with /setup
             timeZone: user.timezone,
           });
           const userDate = new Date(userTime);
+          const userHour = userDate.getHours();
+          const userMinutes = userDate.getMinutes();
+          const isEvenDay = userDate.getDate() % 2 === 0;
 
-          // Check if it's 9 AM in user's timezone
-          if (userDate.getHours() === 9 && userDate.getMinutes() === 0) {
+          // Only proceed if it's exactly on the hour (minutes === 0)
+          if (userMinutes !== 0) continue;
+
+          // Morning check-in at 9 AM on even days
+          if (userHour === 9 && isEvenDay) {
             const message =
               "🌅 Good morning! What's your smallest achievable goal for today?";
             await this.bot.telegram.sendMessage(user.userId, message);
-            await this.db.logMessage(user.userId, message, "check_in");
+            await this.db.messages.logMessage(user.userId, message, "check_in");
           }
 
-          // Check if it's 4 PM for motivation message
-          if (userDate.getHours() === 16 && userDate.getMinutes() === 0) {
+          // Daily motivation message at 12 PM
+          if (userHour === 12) {
             const motivationMessage =
               await this.claude.generateMotivationalMessage(user);
             await this.bot.telegram.sendMessage(user.userId, motivationMessage);
-            await this.db.logMessage(
+            await this.db.messages.logMessage(
               user.userId,
               motivationMessage,
               "motivation"
             );
           }
 
-          // Evening check-in (9 PM in user's timezone)
-          if (userDate.getHours() === 21 && userDate.getMinutes() === 0) {
+          // Evening check-in at 8 PM on even days
+          if (userHour === 20 && isEvenDay) {
             const message =
               "🌙 Evening check-in! Did you manage to achieve your goals today?";
             await this.bot.telegram.sendMessage(user.userId, message);
-            await this.db.logMessage(user.userId, message, "check_in");
+            await this.db.messages.logMessage(user.userId, message, "check_in");
           }
+
+          // Check deadlines for goals
+          await this.checkDeadlines();
         } catch (error) {
           console.error(
             `Failed to process schedule for user ${user.userId}:`,
@@ -801,9 +886,6 @@ Let's begin by setting up your profile with /setup
         }
       }
     });
-
-    // Keep the existing deadline checks
-    scheduleJob("0 9,14,20 * * *", () => this.checkDeadlines());
   }
 
   private formatProgressMessage(progress: any[]): string {

@@ -1,6 +1,8 @@
 import { Anthropic } from "@anthropic-ai/sdk";
 import { UserProfile } from "./types";
-import { DatabaseService } from "./db";
+import { DatabaseService } from "./db/index";
+
+const model = "claude-3-5-haiku-20241022";
 
 export class ClaudeService {
   private client: Anthropic;
@@ -45,7 +47,7 @@ Keep responses concise. If they seem to be struggling or frustrated, offer speci
 Short messages are better than long ones.`;
 
     const message = await this.client.messages.create({
-      model: "claude-3-sonnet-20240229",
+      model: model,
       max_tokens: 400,
       messages: [
         {
@@ -63,7 +65,7 @@ Short messages are better than long ones.`;
     console.log("Generating motivational message...");
 
     // First try to get a custom message
-    const customMessage = await this.db.getNextMotivationMessage(
+    const customMessage = await this.db.messages.getNextMotivationMessage(
       userProfile.userId
     );
     if (customMessage) {

@@ -1,10 +1,14 @@
 import { config } from "dotenv";
 import { MotivationBot } from "./bot";
-import { DatabaseService } from "./db";
+
 import { NotificationService } from "./slack";
 import express from "express";
+import { DatabaseService } from "./db/index";
 
 async function startBot() {
+  let dbService: DatabaseService | null = null;
+  let server: any = null;
+
   try {
     // Load environment variables
     config();
@@ -22,6 +26,9 @@ async function startBot() {
     app.get("/health", async (req, res) => {
       try {
         const dbService = req.app.locals.dbService;
+        if (!dbService) {
+          throw new Error("Database service not initialized");
+        }
 
         // Perform health checks
         await dbService.ensureConnection();
@@ -57,8 +64,8 @@ async function startBot() {
       }
     });
 
-    // Initialize database
-    const dbService = new DatabaseService();
+    // Initialize database with retries
+    dbService = new DatabaseService();
     await dbService.initialize();
     console.log("Database initialized successfully");
 
@@ -71,34 +78,51 @@ async function startBot() {
       dbService
     );
 
-    // Handle shutdown with notification
-    const shutdown = async () => {
-      console.log("Shutting down gracefully...");
-      await notificationService.sendSlackAlert(
-        { message: "Bot shutting down" },
-        { reason: "Graceful shutdown", time: new Date().toISOString() }
-      );
-      await dbService.close();
-      bot.stop();
-      server.close(() => {
-        console.log("Server closed");
-        process.exit(0);
-      });
-    };
-
-    process.once("SIGINT", shutdown);
-    process.once("SIGTERM", shutdown);
-
-    // Start the Express server
-    const server = app.listen(PORT, () => {
+    // Start the health check server
+    server = app.listen(PORT, () => {
       console.log(`Health check server listening on port ${PORT}`);
     });
 
-    // Start the bot
+    // Setup graceful shutdown
+    process.on("SIGTERM", () => gracefulShutdown());
+    process.on("SIGINT", () => gracefulShutdown());
+
+    async function gracefulShutdown() {
+      console.log("Received shutdown signal");
+
+      try {
+        // Close the HTTP server
+        if (server) {
+          await new Promise((resolve) => server.close(resolve));
+          console.log("HTTP server closed");
+        }
+
+        // Close database connection
+        if (dbService) {
+          await dbService.close();
+          console.log("Database connection closed");
+        }
+
+        process.exit(0);
+      } catch (error) {
+        console.error("Error during shutdown:", error);
+        process.exit(1);
+      }
+    }
+
     await bot.start();
     console.log("Bot started successfully");
   } catch (error) {
-    console.error("Error starting bot:", error);
+    console.error("Failed to start bot:", error);
+
+    // Try to clean up resources
+    if (server) {
+      server.close();
+    }
+    if (dbService) {
+      await dbService.close();
+    }
+
     process.exit(1);
   }
 }
