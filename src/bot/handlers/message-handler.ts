@@ -2,6 +2,13 @@ import { DatabaseService } from "../../db/index";
 import { ClaudeService } from "../../claude-service";
 import { UserProfile } from "../../types";
 import { parseGoalAndDeadline } from "../../helper";
+import axios from "axios";
+import { createWriteStream, unlink } from "fs";
+import { promisify } from "util";
+import path from "path";
+import { createReadStream } from "fs";
+
+const unlinkAsync = promisify(unlink);
 
 export class MessageHandler {
   constructor(private db: DatabaseService, private claude: ClaudeService) {}
@@ -22,6 +29,11 @@ export class MessageHandler {
 
     // Don't process commands through AI
     if (messageText.startsWith("/")) {
+      return;
+    }
+
+    if (ctx.message.voice) {
+      await this.handleVoiceMessage(ctx);
       return;
     }
 
@@ -209,6 +221,79 @@ export class MessageHandler {
       console.error("Error handling message:", error);
       await ctx.reply(
         "Sorry, I had trouble processing that. Please try again."
+      );
+    }
+  }
+
+  async handleVoiceMessage(ctx: any): Promise<void> {
+    try {
+      // Get the voice message file
+      const file = await ctx.telegram.getFile(ctx.message.voice.file_id);
+      const filePath = file.file_path;
+
+      if (!filePath) {
+        await ctx.reply(
+          "Sorry, I couldn't process the voice message. Please try again."
+        );
+        return;
+      }
+
+      // Download URL for the voice file
+      const fileUrl = `https://api.telegram.org/file/bot${process.env.TELEGRAM_BOT_TOKEN}/${filePath}`;
+
+      // Create a temporary file path
+      const tempFilePath = path.join(
+        __dirname,
+        `../../../temp/${ctx.message.voice.file_id}.oga`
+      );
+
+      // Download the file
+      const response = await axios({
+        method: "GET",
+        url: fileUrl,
+        responseType: "stream",
+      });
+
+      // Save the file locally
+      const writer = createWriteStream(tempFilePath);
+      response.data.pipe(writer);
+
+      await new Promise((resolve, reject) => {
+        writer.on("finish", resolve);
+        writer.on("error", reject);
+      });
+
+      // Read the file as base64
+      const audioBuffer = await createReadStream(tempFilePath).read();
+      const base64Audio = audioBuffer.toString("base64");
+
+      // Use Claude to transcribe and understand the audio
+      const transcriptionPrompt = `
+        I have a voice recording that I'd like you to transcribe and understand. 
+        The audio is in base64 format. Please transcribe it and respond to the content as you would normally do.
+        Here's the audio data: ${base64Audio}
+      `;
+
+      const user = await this.db.users.getUser(ctx.from.id);
+      if (!user) {
+        await ctx.reply("Please set up your profile first using /setup");
+        return;
+      }
+
+      const airesponse = await this.claude.generateContextualResponse(
+        transcriptionPrompt,
+        user
+      );
+
+      // Clean up the temporary file
+      await unlinkAsync(tempFilePath);
+
+      // Send Claude's response back to the user
+      await ctx.reply(airesponse);
+    } catch (error) {
+      console.error("Error processing voice message:", error);
+      await ctx.reply(
+        "Sorry, there was an error processing your voice message. Please try again or send a text message."
       );
     }
   }

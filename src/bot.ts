@@ -163,6 +163,12 @@ export class MotivationBot {
       "text",
       this.messageHandler.handleMessage.bind(this.messageHandler)
     );
+    
+    // Voice message handler
+    this.bot.on(
+      "voice",
+      this.messageHandler.handleVoiceMessage.bind(this.messageHandler)
+    );
   }
 
   private setupScheduler(): void {
