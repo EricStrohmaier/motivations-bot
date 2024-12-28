@@ -171,7 +171,6 @@ export class MotivationBot {
 
   public start(): void {
     this.bot.launch();
-    console.log("Bot started");
   }
 
   public stop(): void {

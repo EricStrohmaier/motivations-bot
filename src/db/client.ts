@@ -49,11 +49,17 @@ export class DatabaseClient {
     } catch (error) {
       if (this.reconnectAttempts < this.maxReconnectAttempts) {
         this.reconnectAttempts++;
-        console.log(`Retrying connection (attempt ${this.reconnectAttempts}/${this.maxReconnectAttempts})...`);
-        await new Promise(resolve => setTimeout(resolve, this.reconnectDelay));
+        console.log(
+          `Retrying connection (attempt ${this.reconnectAttempts}/${this.maxReconnectAttempts})...`
+        );
+        await new Promise((resolve) =>
+          setTimeout(resolve, this.reconnectDelay)
+        );
         return this.ensureConnection();
       }
-      throw new Error(`Failed to connect to database after ${this.maxReconnectAttempts} attempts`);
+      throw new Error(
+        `Failed to connect to database after ${this.maxReconnectAttempts} attempts`
+      );
     }
   }
 

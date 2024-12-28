@@ -66,6 +66,20 @@ export class MessageService {
     const client = await this.dbClient.getClient();
 
     try {
+      // First check if the created_at column exists
+      const columnExists = await client.query(`
+        SELECT EXISTS (
+          SELECT FROM information_schema.columns 
+          WHERE table_name = 'message_history' 
+          AND column_name = 'created_at'
+        );
+      `);
+
+      if (!columnExists.rows[0].exists) {
+        console.error('created_at column missing from message_history table');
+        return [];
+      }
+
       const result = await client.query(
         `
         SELECT message_text, message_type, created_at 
@@ -78,6 +92,9 @@ export class MessageService {
       );
 
       return result.rows;
+    } catch (error) {
+      console.error('Error getting recent messages:', error);
+      return [];
     } finally {
       client.release();
     }

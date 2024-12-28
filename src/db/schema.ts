@@ -88,6 +88,22 @@ async function updateSchema(client: PoolClient): Promise<void> {
     END $$;
   `);
 
+  // Check if created_at column exists in message_history table
+  const columnExists = await client.query(`
+    SELECT EXISTS (
+      SELECT FROM information_schema.columns 
+      WHERE table_name = 'message_history' 
+      AND column_name = 'created_at'
+    );
+  `);
+
+  if (!columnExists.rows[0].exists) {
+    await client.query(`
+      ALTER TABLE message_history 
+      ADD COLUMN created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+    `);
+  }
+
   // Check for missing columns
   const result = await client.query(`
     SELECT column_name 
