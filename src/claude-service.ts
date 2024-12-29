@@ -148,7 +148,7 @@ Keep responses concise. Short messages are better than long ones.`;
   }
 
   async generateContextualResponse(
-    userMessage: string,
+    userMessage: string | { role: string; content: any[] },
     userProfile: UserProfile
   ): Promise<string> {
     console.log("Generating contextual response...");
@@ -164,7 +164,12 @@ Keep responses concise. Short messages are better than long ones.`;
       .map((msg) => `${msg.role}: ${msg.content}`)
       .join("\n");
 
-    const prompt = `You are a motivational AI assistant. You have an ongoing conversation with a user who has the following context:
+    let messages;
+    if (typeof userMessage === "string") {
+      messages = [
+        {
+          role: "user",
+          content: `You are a motivational AI assistant. You have an ongoing conversation with a user who has the following context:
 
 ${goalsContext}
 
@@ -178,12 +183,24 @@ Respond in a way that:
 2. Addresses their immediate question or comment
 3. Keeps the conversation flowing naturally
 
-Keep responses concise and friendly. If they seem to be struggling or frustrated, offer specific encouragement related to their goals.`;
+Keep responses concise and friendly. If they seem to be struggling or frustrated, offer specific encouragement related to their goals.`,
+        },
+      ];
+    } else {
+      // For structured messages (like audio), ensure proper typing
+      messages = [
+        {
+          role: "user" as const,
+          content: userMessage.content,
+        },
+      ];
+    }
 
     const message = await this.client.messages.create({
       model: model,
       max_tokens: 400,
-      messages: [{ role: "user", content: prompt }],
+      // @ts-ignore
+      messages: messages,
       temperature: 0.7,
     });
 
@@ -193,7 +210,7 @@ Keep responses concise and friendly. If they seem to be struggling or frustrated
     // Update conversation context
     await this.updateConversationContext(userProfile.userId, {
       role: "user",
-      content: userMessage,
+      content: typeof userMessage === "string" ? userMessage : "Voice message",
       timestamp: new Date(),
     });
     await this.updateConversationContext(userProfile.userId, {
@@ -205,7 +222,7 @@ Keep responses concise and friendly. If they seem to be struggling or frustrated
     // Store messages in database
     await this.db.messages.logMessage(
       userProfile.userId,
-      userMessage,
+      typeof userMessage === "string" ? userMessage : "Voice message",
       "user_message"
     );
     await this.db.messages.logMessage(

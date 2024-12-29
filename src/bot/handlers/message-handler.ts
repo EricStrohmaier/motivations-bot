@@ -2,16 +2,26 @@ import { DatabaseService } from "../../db/index";
 import { ClaudeService } from "../../claude-service";
 import { UserProfile } from "../../types";
 import { parseGoalAndDeadline } from "../../helper";
-import axios from "axios";
 import { createWriteStream, unlink } from "fs";
 import { promisify } from "util";
 import path from "path";
 import { createReadStream } from "fs";
+import OpenAI from "openai";
 
 const unlinkAsync = promisify(unlink);
 
 export class MessageHandler {
-  constructor(private db: DatabaseService, private claude: ClaudeService) {}
+  private openai?: OpenAI;
+
+  constructor(
+    private db: DatabaseService,
+    private claude: ClaudeService,
+    openaiApiKey?: string
+  ) {
+    if (openaiApiKey) {
+      this.openai = new OpenAI({ apiKey: openaiApiKey });
+    }
+  }
 
   async handleMessage(ctx: any): Promise<void> {
     const userId = ctx.from.id;
@@ -227,6 +237,13 @@ export class MessageHandler {
 
   async handleVoiceMessage(ctx: any): Promise<void> {
     try {
+      if (!this.openai) {
+        await ctx.reply(
+          "Voice message processing is not configured. Please contact the administrator."
+        );
+        return;
+      }
+
       // Get the voice message file
       const file = await ctx.telegram.getFile(ctx.message.voice.file_id);
       const filePath = file.file_path;
@@ -238,8 +255,11 @@ export class MessageHandler {
         return;
       }
 
+      // Get bot token from context
+      const botToken = (ctx.telegram as any).token;
+
       // Download URL for the voice file
-      const fileUrl = `https://api.telegram.org/file/bot${process.env.TELEGRAM_BOT_TOKEN}/${filePath}`;
+      const fileUrl = `https://api.telegram.org/file/bot${botToken}/${filePath}`;
 
       // Create a temporary file path
       const tempFilePath = path.join(
@@ -247,46 +267,45 @@ export class MessageHandler {
         `../../../temp/${ctx.message.voice.file_id}.oga`
       );
 
-      // Download the file
-      const response = await axios({
-        method: "GET",
-        url: fileUrl,
-        responseType: "stream",
-      });
+      // Download the file using fetch
+      const response = await fetch(fileUrl);
+      if (!response.ok) {
+        throw new Error(`Failed to download file: ${response.statusText}`);
+      }
 
-      // Save the file locally
-      const writer = createWriteStream(tempFilePath);
-      response.data.pipe(writer);
+      // Create write stream and pipe the response to it
+      const fileStream = createWriteStream(tempFilePath);
+      const buffer = await response.arrayBuffer();
+      fileStream.write(Buffer.from(buffer));
+      fileStream.end();
 
+      // Wait for the file to be written
       await new Promise((resolve, reject) => {
-        writer.on("finish", resolve);
-        writer.on("error", reject);
+        fileStream.on("finish", resolve);
+        fileStream.on("error", reject);
       });
 
-      // Read the file as base64
-      const audioBuffer = await createReadStream(tempFilePath).read();
-      const base64Audio = audioBuffer.toString("base64");
+      // Transcribe using Whisper API
+      const transcription = await this.openai.audio.transcriptions.create({
+        file: createReadStream(tempFilePath),
+        model: "whisper-1",
+      });
 
-      // Use Claude to transcribe and understand the audio
-      const transcriptionPrompt = `
-        I have a voice recording that I'd like you to transcribe and understand. 
-        The audio is in base64 format. Please transcribe it and respond to the content as you would normally do.
-        Here's the audio data: ${base64Audio}
-      `;
+      // Clean up the temporary file
+      await unlinkAsync(tempFilePath);
 
+      // Get user profile
       const user = await this.db.users.getUser(ctx.from.id);
       if (!user) {
         await ctx.reply("Please set up your profile first using /setup");
         return;
       }
 
+      // Send transcribed text to Claude for contextual response
       const airesponse = await this.claude.generateContextualResponse(
-        transcriptionPrompt,
+        transcription.text,
         user
       );
-
-      // Clean up the temporary file
-      await unlinkAsync(tempFilePath);
 
       // Send Claude's response back to the user
       await ctx.reply(airesponse);

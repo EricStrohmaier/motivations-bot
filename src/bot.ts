@@ -19,7 +19,8 @@ export class MotivationBot {
   constructor(
     telegramToken: string,
     claudeApiKey: string,
-    dbService: DatabaseService
+    dbService: DatabaseService,
+    openaiApiKey?: string
   ) {
     this.bot = new Telegraf(telegramToken);
     this.db = dbService;
@@ -27,7 +28,11 @@ export class MotivationBot {
 
     // Initialize handlers
     this.commandHandler = new CommandHandler(this.db, this.claude);
-    this.messageHandler = new MessageHandler(this.db, this.claude);
+    this.messageHandler = new MessageHandler(
+      this.db,
+      this.claude,
+      openaiApiKey
+    );
     this.actionHandler = new ActionHandler(this.db, this.claude);
     this.schedulerService = new SchedulerService(
       this.bot,
@@ -163,7 +168,7 @@ export class MotivationBot {
       "text",
       this.messageHandler.handleMessage.bind(this.messageHandler)
     );
-    
+
     // Voice message handler
     this.bot.on(
       "voice",

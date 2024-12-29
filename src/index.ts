@@ -75,7 +75,8 @@ async function startBot() {
     const bot = new MotivationBot(
       process.env.TELEGRAM_TOKEN!,
       process.env.ANTHROPIC_API_KEY!,
-      dbService
+      dbService,
+      process.env.OPENAI_API_KEY
     );
 
     // Start the health check server
